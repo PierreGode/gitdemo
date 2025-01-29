@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Add PR Comment
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
         run: |
           # Parse values from event payload
           PR_NUMBER=$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")
