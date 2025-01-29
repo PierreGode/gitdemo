@@ -1,0 +1,45 @@
+name: Minimal PR Comment
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  minimal_comment_job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add PR Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
+        run: |
+          # Parse values from event payload
+          PR_NUMBER=$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")
+          PR_TITLE=$(jq -r '.pull_request.title' "$GITHUB_EVENT_PATH")
+          REPO_FULL_NAME=$(jq -r '.pull_request.base.repo.full_name' "$GITHUB_EVENT_PATH")
+          PR_URL=$(jq -r '.pull_request.html_url' "$GITHUB_EVENT_PATH")
+
+          # Build the comment text
+          COMMENT_CONTENT="📌 PR Summary: $PR_TITLE
+🔹 Repository: $REPO_FULL_NAME
+📌 Pull Request: $PR_TITLE (#$PR_NUMBER)
+🔢 PR Number
+#$PR_NUMBER
+🔗 PR Link
+[View Pull Request]($PR_URL)
+"
+
+          # Post the comment to the PR
+          curl -s \
+            -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": \"$COMMENT_CONTENT\"}" \
+            "https://api.github.com/repos/$REPO_FULL_NAME/issues/$PR_NUMBER/comments"
