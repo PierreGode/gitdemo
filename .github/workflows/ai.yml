@@ -72,12 +72,12 @@ jobs:
           for fdata in pr_files:
               filename = fdata['filename']
               patch = fdata.get('patch', 'No changes')
-              diff_text += f"File: {filename}\nPatch:\n"
+              diff_text += f"📄 **File:** `{filename}`\n🔹 **Changes:**\n"
               for line in patch.split('\n'):
                   if line.startswith('+'):
-                      diff_text += f"Added: {line[1:]}\n"
+                      diff_text += f"🟢 Added: `{line[1:]}`\n"
                   elif line.startswith('-'):
-                      diff_text += f"Removed: {line[1:]}\n"
+                      diff_text += f"🔴 Removed: `{line[1:]}`\n"
                   else:
                       diff_text += f"{line}\n"
 
@@ -113,21 +113,29 @@ jobs:
 
           print("PR Summary posted successfully.")
 
-          # Send Adaptive Card to Microsoft Teams
+          # Send Improved Adaptive Card to Microsoft Teams
           teams_payload = {
               "@type": "MessageCard",
               "@context": "http://schema.org/extensions",
               "themeColor": "0076D7",
               "summary": "New AI PR Summary",
-              "sections": [{
-                  "activityTitle": "**AI-Generated PR Summary**",
-                  "activitySubtitle": f"Repository: {repo_full_name}",
-                  "facts": [
-                      { "name": "Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
-                      { "name": "Summary", "value": summary }
-                  ],
-                  "markdown": True
-              }]
+              "title": f"📌 PR Summary: {pr_title}",
+              "sections": [
+                  {
+                      "activityTitle": f"🔹 **Repository:** `{repo_full_name}`",
+                      "activitySubtitle": f"📌 **Pull Request:** [{pr_title} (#{pr_number})]({pr_url})",
+                      "facts": [
+                          { "name": "🔢 PR Number", "value": f"#{pr_number}" },
+                          { "name": "🔗 PR Link", "value": f"[View Pull Request]({pr_url})" }
+                      ],
+                      "markdown": True
+                  },
+                  {
+                      "activityTitle": "📄 **AI-Generated PR Summary**",
+                      "text": f"{summary}",
+                      "markdown": True
+                  }
+              ]
           }
 
           teams_headers = {"Content-Type": "application/json"}
@@ -157,5 +165,4 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_MODEL: "gpt-4o-mini"
           exclude: "**/*.json,**/*.md"
-          # Assuming the action allows passing additional context, include README
           additional_context: ${{ steps.read_readme_review.outputs.README }}
