@@ -54,7 +54,7 @@ jobs:
 
           pr_number = event['pull_request']['number']
           pr_title = event['pull_request']['title']
-          repo_full_name = event['repository']['full_name']
+          repo_full_name = os.environ.get('GITHUB_REPOSITORY', 'Unknown Repository')
           pr_url = event['pull_request']['html_url']
           token = os.environ.get('GITHUB_TOKEN')
           openai_key = os.environ.get('OPENAI_API_KEY')
@@ -72,12 +72,12 @@ jobs:
           for fdata in pr_files:
               filename = fdata['filename']
               patch = fdata.get('patch', 'No changes')
-              diff_text += f"File: {filename}\nPatch:\n"
+              diff_text += f"📄 **File:** `{filename}`\n🔹 **Changes:**\n"
               for line in patch.split('\n'):
                   if line.startswith('+'):
-                      diff_text += f"Added: {line[1:]}\n"
+                      diff_text += f"🟢 Added: `{line[1:]}`\n"
                   elif line.startswith('-'):
-                      diff_text += f"Removed: {line[1:]}\n"
+                      diff_text += f"🔴 Removed: `{line[1:]}`\n"
                   else:
                       diff_text += f"{line}\n"
 
@@ -104,7 +104,7 @@ jobs:
           summary_response.raise_for_status()
           summary = summary_response.json()['choices'][0]['message']['content'].strip()
 
-          # Post summary as PR comment
+          # Post summary as PR comment (unchanged)
           comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
           summary_comment = {
               "body": f"**AI Pull Request Summary:**\n{summary}"
@@ -113,21 +113,35 @@ jobs:
 
           print("PR Summary posted successfully.")
 
-          # Send Adaptive Card to Microsoft Teams
+          # Format AI Summary for better readability in Teams
+          formatted_summary = "\n\n".join(
+              f"🔹 **{line.strip()}**" if line.strip() and not line.startswith("-") else f"🟢 {line.strip()}"
+              for line in summary.split("\n")
+          )
+
+          # Send Improved Adaptive Card to Microsoft Teams
           teams_payload = {
               "@type": "MessageCard",
               "@context": "http://schema.org/extensions",
               "themeColor": "0076D7",
               "summary": "New AI PR Summary",
-              "sections": [{
-                  "activityTitle": "**AI-Generated PR Summary**",
-                  "activitySubtitle": f"Repository: {repo_full_name}",
-                  "facts": [
-                      { "name": "Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
-                      { "name": "Summary", "value": summary }
-                  ],
-                  "markdown": True
-              }]
+              "title": f"📌 PR Summary: {pr_title}",
+              "sections": [
+                  {
+                      "activityTitle": f"🔹 **Repository:** `{repo_full_name}`",
+                      "activitySubtitle": f"📌 **Pull Request:** [{pr_title} (#{pr_number})]({pr_url})",
+                      "facts": [
+                          { "name": "🔢 PR Number", "value": f"#{pr_number}" },
+                          { "name": "🔗 PR Link", "value": f"[View Pull Request]({pr_url})" }
+                      ],
+                      "markdown": True
+                  },
+                  {
+                      "activityTitle": "📄 **AI-Generated PR Summary**",
+                      "text": formatted_summary,
+                      "markdown": True
+                  }
+              ]
           }
 
           teams_headers = {"Content-Type": "application/json"}
@@ -157,5 +171,4 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_MODEL: "gpt-4o-mini"
           exclude: "**/*.json,**/*.md"
-          # Assuming the action allows passing additional context, include README
           additional_context: ${{ steps.read_readme_review.outputs.README }}
