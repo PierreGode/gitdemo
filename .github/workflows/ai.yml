@@ -73,24 +73,24 @@ jobs:
               filename = fdata['filename']
               patch = fdata.get('patch', 'No changes')
               diff_text += f"File: {filename}\nPatch:\n"
-              for line in patch.split('\n'):
-                  if line.startswith('+'):
+              for line in patch.split('\\n'):
+                  if line.startswith('+') and not line.startswith('+++'):
                       diff_text += f"Added: {line[1:]}\n"
-                  elif line.startswith('-'):
+                  elif line.startswith('-') and not line.startswith('---'):
                       diff_text += f"Removed: {line[1:]}\n"
                   else:
                       diff_text += f"{line}\n"
 
           summary_prompt = (
-              f"Analyze the following Pull Request Diff and summarize the changes. Use the following README as a basic understanding of the repository and its purpose to give a more precise pull request summary. Provide a comprehensive analysis of the pull request. \n\n"
-              f"**README Content:**\n{readme_content}\n\n"
-              f"**Pull Request Diff:**\n{diff_text}\n\n"
-              f"Please include the following in your summary:\n"
-              f"- Key files and components modified.\n"
-              f"- Main purpose of the changes (e.g., bug fixes, feature additions, optimizations).\n"
-              f"- Specific functionalities introduced, modified, or removed.\n"
-              f"  - Highlight lines added (marked with 'Added:') and lines removed (marked with 'Removed:').\n"
-              f"- Any potential implications or considerations (e.g., performance impacts, breaking changes, dependencies).\n"
+              f"Analyze the following Pull Request Diff and summarize the changes. Use the following README as a basic understanding of the repository and its purpose to give a more precise pull request summary. Provide a comprehensive analysis of the pull request. \\n\\n"
+              f"**README Content:**\\n{readme_content}\\n\\n"
+              f"**Pull Request Diff:**\\n{diff_text}\\n\\n"
+              f"Please include the following in your summary:\\n"
+              f"- Key files and components modified.\\n"
+              f"- Main purpose of the changes (e.g., bug fixes, feature additions, optimizations).\\n"
+              f"- Specific functionalities introduced, modified, or removed.\\n"
+              f"  - Highlight lines added (marked with 'Added:') and lines removed (marked with 'Removed:').\\n"
+              f"- Any potential implications or considerations (e.g., performance impacts, breaking changes, dependencies).\\n"
               f"Ensure the summary clearly states which version contains corrections or bug fixes."
           )
 
@@ -107,7 +107,7 @@ jobs:
           # Post summary as PR comment
           comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
           summary_comment = {
-              "body": f"**AI Pull Request Summary:**\n{summary}"
+              "body": f"**AI Pull Request Summary:**\\n{summary}"
           }
           requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
 
@@ -119,15 +119,41 @@ jobs:
               "@context": "http://schema.org/extensions",
               "themeColor": "0076D7",
               "summary": "New AI PR Summary",
-              "sections": [{
-                  "activityTitle": "**AI-Generated PR Summary**",
-                  "activitySubtitle": f"Repository: {repo_full_name}",
-                  "facts": [
-                      { "name": "Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
-                      { "name": "Summary", "value": summary }
-                  ],
-                  "markdown": True
-              }]
+              "sections": [
+                  {
+                      "activityTitle": "**📝 AI-Generated PR Summary**",
+                      "activitySubtitle": f"📂 Repository: **{repo_full_name}**",
+                      "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+                      "facts": [
+                          { "name": "🔖 Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
+                          { "name": "📅 Created By", "value": f"{event['pull_request']['user']['login']}" },
+                          { "name": "📈 Changes", "value": f"{len(pr_files)} files modified" }
+                      ],
+                      "markdown": True
+                  },
+                  {
+                      "title": "📄 Summary",
+                      "text": f"{summary}",
+                      "markdown": True
+                  },
+                  {
+                      "title": "🔍 Details",
+                      "text": "Detailed information about the pull request can be found in the summary above.",
+                      "markdown": True
+                  },
+                  {
+                      "text": "✅ [View Pull Request](" + pr_url + ")",
+                      "potentialAction": [
+                          {
+                              "@type": "OpenUri",
+                              "name": "View on GitHub",
+                              "targets": [
+                                  { "os": "default", "uri": pr_url }
+                              ]
+                          }
+                      ]
+                  }
+              ]
           }
 
           teams_headers = {"Content-Type": "application/json"}
