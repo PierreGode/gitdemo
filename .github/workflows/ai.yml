@@ -20,6 +20,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Read README.md
+        id: read_readme
+        run: |
+          README_CONTENT=$(cat README.md)
+          echo "::set-output name=README::$README_CONTENT"
+
       - name: Set Up Python
         uses: actions/setup-python@v4
         with:
@@ -34,6 +40,8 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
+          README_CONTENT: ${{ steps.read_readme.outputs.README }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
           python - <<EOF
           import os
@@ -45,9 +53,13 @@ jobs:
               event = json.load(f)
 
           pr_number = event['pull_request']['number']
+          pr_title = event['pull_request']['title']
           repo_full_name = event['repository']['full_name']
+          pr_url = event['pull_request']['html_url']
           token = os.environ.get('GITHUB_TOKEN')
           openai_key = os.environ.get('OPENAI_API_KEY')
+          readme_content = os.environ.get('README_CONTENT')
+          teams_webhook_url = os.environ.get('TEAMS_WEBHOOK_URL')
 
           headers = {
               'Authorization': f'token {token}',
@@ -70,14 +82,16 @@ jobs:
                       diff_text += f"{line}\n"
 
           summary_prompt = (
-              f"Analyze the following pull request diff and summarize the changes. "
-              f"- Key files and components modified. "
-              f"- Main purpose of the changes (e.g., bug fixes, feature additions, optimizations). "
-              f"- Specific functionalities introduced, modified, or removed. "
-              f"Highlight lines added (marked with 'Added:') and lines removed (marked with 'Removed:'). "
-              f"- Any potential implications or considerations (e.g., performance impacts, breaking changes, dependencies). "
-              f"Ensure the summary clearly states which version contains corrections or bug fixes.\n\n"
-              f"Here is the diff:\n\n{diff_text}"
+              f"Analyze the following Pull Request Diff and summarize the changes. Use the following README as a basic understanding of the repository and its purpose to give a more precise pull request summary. Provide a comprehensive analysis of the pull request. \n\n"
+              f"**README Content:**\n{readme_content}\n\n"
+              f"**Pull Request Diff:**\n{diff_text}\n\n"
+              f"Please include the following in your summary:\n"
+              f"- Key files and components modified.\n"
+              f"- Main purpose of the changes (e.g., bug fixes, feature additions, optimizations).\n"
+              f"- Specific functionalities introduced, modified, or removed.\n"
+              f"  - Highlight lines added (marked with 'Added:') and lines removed (marked with 'Removed:').\n"
+              f"- Any potential implications or considerations (e.g., performance impacts, breaking changes, dependencies).\n"
+              f"Ensure the summary clearly states which version contains corrections or bug fixes."
           )
 
           ai_headers = {"Content-Type": "application/json", "Authorization": f"Bearer {openai_key}"}
@@ -90,6 +104,7 @@ jobs:
           summary_response.raise_for_status()
           summary = summary_response.json()['choices'][0]['message']['content'].strip()
 
+          # Post summary as PR comment
           comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
           summary_comment = {
               "body": f"**AI Pull Request Summary:**\n{summary}"
@@ -97,6 +112,29 @@ jobs:
           requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
 
           print("PR Summary posted successfully.")
+
+          # Send Adaptive Card to Microsoft Teams
+          teams_payload = {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": "0076D7",
+              "summary": "New AI PR Summary",
+              "sections": [{
+                  "activityTitle": "**AI-Generated PR Summary**",
+                  "activitySubtitle": f"Repository: {repo_full_name}",
+                  "facts": [
+                      { "name": "Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
+                      { "name": "Summary", "value": summary }
+                  ],
+                  "markdown": True
+              }]
+          }
+
+          teams_headers = {"Content-Type": "application/json"}
+          response = requests.post(teams_webhook_url, headers=teams_headers, json=teams_payload)
+          response.raise_for_status()
+
+          print("PR Summary sent to Microsoft Teams successfully.")
           EOF
 
   code_review:
@@ -106,6 +144,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Read README.md
+        id: read_readme_review
+        run: |
+          README_CONTENT=$(cat README.md)
+          echo "::set-output name=README::$README_CONTENT"
+
       - name: AI Code Review
         uses: PierreGode/GPTcode-reviewer@main
         with:
@@ -113,3 +157,5 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_MODEL: "gpt-4o-mini"
           exclude: "**/*.json,**/*.md"
+          # Assuming the action allows passing additional context, include README
+          additional_context: ${{ steps.read_readme_review.outputs.README }}
