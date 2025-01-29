@@ -47,6 +47,7 @@ jobs:
           import os
           import requests
           import json
+          import re
 
           event_path = os.environ.get('GITHUB_EVENT_PATH')
           with open(event_path, 'r') as f:
@@ -104,7 +105,7 @@ jobs:
           summary_response.raise_for_status()
           summary = summary_response.json()['choices'][0]['message']['content'].strip()
 
-          # Post summary as PR comment
+          # Post summary as PR comment (unchanged format)
           comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
           summary_comment = {
               "body": f"**AI Pull Request Summary:**\\n{summary}"
@@ -113,7 +114,11 @@ jobs:
 
           print("PR Summary posted successfully.")
 
-          # Send Adaptive Card to Microsoft Teams
+          # --- POST-PROCESSING FOR TEAMS ONLY ---
+          # Remove Markdown heading symbols to avoid large heading sizes in Teams.
+          summary_for_teams = re.sub(r'^(#{1,6})\s+', '', summary, flags=re.MULTILINE)
+
+          # Prepare Enhanced Teams Payload (structure unchanged, but use summary_for_teams)
           teams_payload = {
               "@type": "MessageCard",
               "@context": "http://schema.org/extensions",
@@ -132,21 +137,15 @@ jobs:
                       "markdown": True
                   },
                   {
-                      "title": "📄 Summary",
-                      "text": f"{summary}",
+                      "title": "📄 **Summary**",
+                      "text": f"{summary_for_teams}",
                       "markdown": True
                   },
                   {
-                      "title": "🔍 Details",
-                      "text": "Detailed information about the pull request can be found in the summary above.",
-                      "markdown": True
-                  },
-                  {
-                      "text": "✅ [View Pull Request](" + pr_url + ")",
                       "potentialAction": [
                           {
                               "@type": "OpenUri",
-                              "name": "View on GitHub",
+                              "name": "🔗 View on GitHub",
                               "targets": [
                                   { "os": "default", "uri": pr_url }
                               ]
@@ -156,6 +155,7 @@ jobs:
               ]
           }
 
+          # Send Enhanced Teams Payload
           teams_headers = {"Content-Type": "application/json"}
           response = requests.post(teams_webhook_url, headers=teams_headers, json=teams_payload)
           response.raise_for_status()
@@ -183,5 +183,4 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_MODEL: "gpt-4o-mini"
           exclude: "**/*.json,**/*.md"
-          # Assuming the action allows passing additional context, include README
           additional_context: ${{ steps.read_readme_review.outputs.README }}
