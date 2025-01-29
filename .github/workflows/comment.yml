@@ -29,9 +29,9 @@ jobs:
           # Build the comment text
           COMMENT_CONTENT="📌 PR Summary: $PR_TITLE
 🔹 Repository: $REPO_FULL_NAME
-📌 Pull Request: $PR_TITLE (#$PR_NUMBER)
+📌 Pull Request: $PR_TITLE ($PR_NUMBER)
 🔢 PR Number
-#$PR_NUMBER
+[PR number]($PR_NUMBER)
 🔗 PR Link
 [View Pull Request]($PR_URL)
 "
