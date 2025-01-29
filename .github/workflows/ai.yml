@@ -72,12 +72,12 @@ jobs:
           for fdata in pr_files:
               filename = fdata['filename']
               patch = fdata.get('patch', 'No changes')
-              diff_text += f"File: {filename}\nPatch:\n"
+              diff_text += f"📄 **File:** `{filename}`\n🔹 **Changes:**\n"
               for line in patch.split('\n'):
                   if line.startswith('+'):
-                      diff_text += f"Added: {line[1:]}\n"
+                      diff_text += f"🟢 **Added:** `{line[1:]}`\n"
                   elif line.startswith('-'):
-                      diff_text += f"Removed: {line[1:]}\n"
+                      diff_text += f"🔴 **Removed:** `{line[1:]}`\n"
                   else:
                       diff_text += f"{line}\n"
 
@@ -86,12 +86,11 @@ jobs:
               f"**README Content:**\n{readme_content}\n\n"
               f"**Pull Request Diff:**\n{diff_text}\n\n"
               f"Please include the following in your summary:\n"
-              f"- Key files and components modified.\n"
-              f"- Main purpose of the changes (e.g., bug fixes, feature additions, optimizations).\n"
-              f"- Specific functionalities introduced, modified, or removed.\n"
-              f"  - Highlight lines added (marked with 'Added:') and lines removed (marked with 'Removed:').\n"
-              f"- Any potential implications or considerations (e.g., performance impacts, breaking changes, dependencies).\n"
-              f"Ensure the summary clearly states which version contains corrections or bug fixes."
+              f"- **Key files and components modified**.\n"
+              f"- **Main purpose of the changes** (e.g., bug fixes, feature additions, optimizations).\n"
+              f"- **Specific functionalities introduced, modified, or removed**.\n"
+              f"- **Highlight lines added** (marked with '🟢 Added:') and **lines removed** (marked with '🔴 Removed:').\n"
+              f"- **Any potential implications or considerations** (e.g., performance impacts, breaking changes, dependencies).\n"
           )
 
           ai_headers = {"Content-Type": "application/json", "Authorization": f"Bearer {openai_key}"}
@@ -104,6 +103,18 @@ jobs:
           summary_response.raise_for_status()
           summary = summary_response.json()['choices'][0]['message']['content'].strip()
 
+          # Format AI Summary for Teams (structured bullet points)
+          formatted_summary = f"""
+          - 🛠 **Modified Files:**  
+            {summary.split('Key files and components modified:')[1].split('- Main purpose of the changes')[0].strip()}
+          - 🎯 **Main Purpose:**  
+            {summary.split('Main purpose of the changes:')[1].split('- Specific functionalities')[0].strip()}
+          - 🔄 **Changes in Functionality:**  
+            {summary.split('Specific functionalities introduced, modified, or removed:')[1].split('- Highlight lines added')[0].strip()}
+          - 📉 **Implications & Considerations:**  
+            {summary.split('Any potential implications or considerations:')[1].strip()}
+          """
+
           # Post summary as PR comment
           comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
           summary_comment = {
@@ -113,21 +124,29 @@ jobs:
 
           print("PR Summary posted successfully.")
 
-          # Send Adaptive Card to Microsoft Teams
+          # Send Improved Adaptive Card to Microsoft Teams
           teams_payload = {
               "@type": "MessageCard",
               "@context": "http://schema.org/extensions",
               "themeColor": "0076D7",
               "summary": "New AI PR Summary",
-              "sections": [{
-                  "activityTitle": "**AI-Generated PR Summary**",
-                  "activitySubtitle": f"Repository: {repo_full_name}",
-                  "facts": [
-                      { "name": "Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
-                      { "name": "Summary", "value": summary }
-                  ],
-                  "markdown": True
-              }]
+              "title": f"📌 PR Summary: {pr_title}",
+              "sections": [
+                  {
+                      "activityTitle": f"🔹 **Repository:** `{repo_full_name}`",
+                      "activitySubtitle": f"📌 **Pull Request:** [{pr_title} (#{pr_number})]({pr_url})",
+                      "facts": [
+                          { "name": "🔢 PR Number", "value": f"#{pr_number}" },
+                          { "name": "🔗 PR Link", "value": f"[View Pull Request]({pr_url})" }
+                      ],
+                      "markdown": True
+                  },
+                  {
+                      "activityTitle": "📄 **AI-Generated PR Summary**",
+                      "text": formatted_summary,
+                      "markdown": True
+                  }
+              ]
           }
 
           teams_headers = {"Content-Type": "application/json"}
@@ -157,5 +176,4 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_MODEL: "gpt-4o-mini"
           exclude: "**/*.json,**/*.md"
-          # Assuming the action allows passing additional context, include README
           additional_context: ${{ steps.read_readme_review.outputs.README }}
