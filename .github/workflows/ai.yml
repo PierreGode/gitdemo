@@ -191,15 +191,13 @@ jobs:
 
           echo "Found AI Pull Request Summary comment."
 
-          # Extract the summary text after the keyword
-          # Assuming the format: "**AI Pull Request Summary:**\n<summary text>"
-          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/\*\*AI Pull Request Summary:\*\*/, $p' | sed '1d')
+          # Extract the summary text after the keyword using awk
+          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | awk '/\*\*AI Pull Request Summary:\*\*/ {flag=1; next} flag {print}')
 
-          # Fallback if the format is different
-          if [ -z "$AI_SUMMARY" ]; then
-            AI_SUMMARY="$AI_SUMMARY_COMMENT"
-          fi
+          # Remove any leading/trailing empty lines
+          AI_SUMMARY=$(echo "$AI_SUMMARY" | sed '/^$/d')
 
+          echo "Extracted AI Summary Length: ${#AI_SUMMARY}"
           echo "Extracted AI Summary: $AI_SUMMARY"
 
           # Save the AI summary to output
@@ -214,6 +212,34 @@ jobs:
           echo "AI Pull Request Summary for PR #${PR_NUMBER}:"
           echo "${{ steps.fetch_ai_summary.outputs.ai_summary }}"
 
+      - name: Fetch PR Details for Teams Payload
+        if: steps.find_pr.outputs.pr_number != ''
+        id: fetch_pr_details
+        run: |
+          PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+          echo "Fetching PR details for PR #${PR_NUMBER}..."
+
+          # Fetch PR details
+          PR_DETAILS=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}")
+
+          echo "Raw PR details: $PR_DETAILS"
+
+          # Extract required fields
+          PR_TITLE=$(echo "$PR_DETAILS" | jq -r '.title')
+          PR_CREATOR=$(echo "$PR_DETAILS" | jq -r '.user.login')
+          REPO_FULL_NAME=$(echo "$PR_DETAILS" | jq -r '.base.repo.full_name')
+
+          # Fetch number of files changed
+          FILES_CHANGED=$(echo "$PR_DETAILS" | jq '.changed_files')
+
+          echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
+          echo "pr_creator=$PR_CREATOR" >> $GITHUB_OUTPUT
+          echo "repo_full_name=$REPO_FULL_NAME" >> $GITHUB_OUTPUT
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+
       - name: Send AI Summary to Teams
         if: steps.fetch_ai_summary.outputs.ai_summary != ''
         env:
@@ -221,17 +247,54 @@ jobs:
         run: |
           AI_SUMMARY="${{ steps.fetch_ai_summary.outputs.ai_summary }}"
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER }}"
+          PR_TITLE="${{ steps.fetch_pr_details.outputs.pr_title }}"
+          PR_CREATOR="${{ steps.fetch_pr_details.outputs.pr_creator }}"
+          REPO_FULL_NAME="${{ steps.fetch_pr_details.outputs.repo_full_name }}"
+          FILES_CHANGED="${{ steps.fetch_pr_details.outputs.files_changed }}"
 
+          # Construct the Teams payload
           PAYLOAD=$(jq -n \
-            --arg title "AI Pull Request Summary for PR #$PR_NUMBER" \
-            --arg text "$AI_SUMMARY\n\n[View PR]($PR_LINK)" \
+            --arg title "📝 AI-Generated PR Summary" \
+            --arg repository "📂 Repository: **${REPO_FULL_NAME}**" \
+            --arg pr "🔖 Pull Request: [${PR_TITLE} (#${PR_NUMBER})](${PR_LINK})" \
+            --arg creator "📅 Created By: ${PR_CREATOR}" \
+            --arg changes "${FILES_CHANGED} files modified" \
+            --arg summary "${AI_SUMMARY}" \
             '{
               "@type": "MessageCard",
               "@context": "http://schema.org/extensions",
-              "summary": $title,
-              "title": $title,
-              "text": $text
+              "themeColor": "0076D7",
+              "summary": "New AI PR Summary",
+              "sections": [
+                {
+                  "activityTitle": "**\($title)**",
+                  "activitySubtitle": "\($repository)",
+                  "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+                  "facts": [
+                    { "name": "🔖 Pull Request", "value": "\($pr)" },
+                    { "name": "📅 Created By", "value": "\($creator)" },
+                    { "name": "📈 Changes", "value": "\($changes)" }
+                  ],
+                  "markdown": true
+                },
+                {
+                  "title": "📄 **Summary**",
+                  "text": "\($summary)",
+                  "markdown": true
+                },
+                {
+                  "potentialAction": [
+                    {
+                      "@type": "OpenUri",
+                      "name": "🔗 View on GitHub",
+                      "targets": [
+                        { "os": "default", "uri": "\($pr_link)" }
+                      ]
+                    }
+                  ]
+                }
+              ]
             }')
 
           # Send the payload to the Teams webhook
