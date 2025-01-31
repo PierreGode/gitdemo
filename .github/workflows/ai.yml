@@ -17,6 +17,9 @@ permissions:
   issues: write
 
 jobs:
+  # --------------------------------------------
+  # 1) Generate AI Pull Request Summary (unchanged)
+  # --------------------------------------------
   pr_summary:
     name: "PR Summary"
     runs-on: ubuntu-latest
@@ -51,7 +54,6 @@ jobs:
           import os
           import requests
           import json
-          import re
 
           event_path = os.environ.get('GITHUB_EVENT_PATH')
           with open(event_path, 'r') as f:
@@ -118,6 +120,9 @@ jobs:
           print("PR Summary posted successfully.")
           EOF
 
+  # --------------------------------------------
+  # 2) Send AI Summary to Teams (updated, no sed)
+  # --------------------------------------------
   send_to_teams:
     name: "Send AI Summary to Teams"
     runs-on: ubuntu-latest
@@ -164,7 +169,7 @@ jobs:
           echo "Merged PR: #${PR_NUMBER}"
           echo "PR Link : ${PR_LINK}"
 
-      - name: Fetch AI Pull Request Summary Comment
+      - name: Fetch AI Pull Request Summary Comment (No sed)
         if: steps.find_pr.outputs.pr_number != ''
         id: fetch_ai_summary
         run: |
@@ -179,7 +184,7 @@ jobs:
 
           echo "Raw comments: $COMMENTS"
 
-          # Extract the comment containing "AI Pull Request Summary"
+          # Extract the single comment containing "AI Pull Request Summary"
           AI_SUMMARY_COMMENT=$(echo "$COMMENTS" | \
             jq -r '.[] | select(.body | contains("AI Pull Request Summary")) | .body')
 
@@ -191,20 +196,28 @@ jobs:
 
           echo "Found AI Pull Request Summary comment."
 
-          # Extract the summary text after the keyword
-          # Assuming the format: "**AI Pull Request Summary:**\n<summary text>"
-          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/\\*\\*AI Pull Request Summary:\\*\\*/,/^$/p' | sed '1d' | sed '/^$/d')
+          # Use a tiny Python snippet to extract text after "**AI Pull Request Summary:**"
+          EXTRACTED_SUMMARY=$(python3 <<EOF
+import sys
 
-          # Fallback if the format is different
-          if [ -z "$AI_SUMMARY" ]; then
-            AI_SUMMARY="$AI_SUMMARY_COMMENT"
-          fi
+ai_body = """$AI_SUMMARY_COMMENT""".rstrip()
 
-          echo "Extracted AI Summary: $AI_SUMMARY"
+split_token = "**AI Pull Request Summary:**"
+parts = ai_body.split(split_token, 1)
+if len(parts) > 1:
+    summary = parts[1].strip()
+else:
+    summary = ai_body.strip()
+
+print(summary)
+EOF
+)
+
+          echo "Extracted AI Summary: $EXTRACTED_SUMMARY"
 
           # Save the AI summary to output
           echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
-          echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
+          echo "$EXTRACTED_SUMMARY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Print AI Pull Request Summary
@@ -241,6 +254,9 @@ jobs:
 
           echo "PR Summary sent to Microsoft Teams successfully."
 
+  # --------------------------------------------
+  # 3) AI Code Review (unchanged)
+  # --------------------------------------------
   code_review:
     name: "AI Code Review"
     runs-on: ubuntu-latest
