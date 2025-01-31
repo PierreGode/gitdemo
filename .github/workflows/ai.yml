@@ -51,7 +51,6 @@ jobs:
           import os
           import requests
           import json
-          import re
 
           event_path = os.environ.get('GITHUB_EVENT_PATH')
           with open(event_path, 'r') as f:
@@ -191,9 +190,32 @@ jobs:
 
           echo "Found AI Pull Request Summary comment."
 
-          # Extract the summary text after the keyword
-          # Assuming the format: "**AI Pull Request Summary:**\n<summary text>"
-          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/\\*\\*AI Pull Request Summary:\\*\\*/,/^$/p' | sed '1d' | sed '/^$/d')
+          ############################
+          # Python-based Extraction
+          ############################
+
+          # Extract the summary using Python for robust pattern matching
+          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | python3 -c "
+import sys
+import re
+
+comment = sys.stdin.read()
+
+# Try to match '**AI Pull Request Summary:**\n### Pull Request Summary\n\n<summary>'
+match = re.search(r'\\*\\*AI Pull Request Summary:\\*\\*:\\n(.+)', comment, re.DOTALL)
+if match:
+    summary = match.group(1).strip()
+else:
+    # Try to match 'AI Pull Request Summary:\n### Pull Request Summary\n\n<summary>'
+    match = re.search(r'AI Pull Request Summary:\\n(.+)', comment, re.DOTALL)
+    if match:
+        summary = match.group(1).strip()
+    else:
+        # Fallback to the entire comment
+        summary = comment.strip()
+
+print(summary)
+")
 
           # Fallback if the format is different
           if [ -z "$AI_SUMMARY" ]; then
@@ -221,7 +243,7 @@ jobs:
         run: |
           AI_SUMMARY="${{ steps.fetch_ai_summary.outputs.ai_summary }}"
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}}"
 
           PAYLOAD=$(jq -n \
             --arg title "AI Pull Request Summary for PR #$PR_NUMBER" \
