@@ -191,14 +191,17 @@ jobs:
 
           echo "Found AI Pull Request Summary comment."
 
-          # Extract the summary text after the keyword
-          # Assuming the format: "**AI Pull Request Summary:**\n<summary text>"
-          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/\\*\\*AI Pull Request Summary:\\*\\*/,/^$/p' | sed '1d' | sed '/^$/d')
-
-          # Fallback if the format is different
-          if [ -z "$AI_SUMMARY" ]; then
-            AI_SUMMARY="$AI_SUMMARY_COMMENT"
-          fi
+          # Extract the summary text after the keyword using Python
+          AI_SUMMARY=$(python3 -c "
+import re
+comment = '''$AI_SUMMARY_COMMENT'''
+match = re.search(r'\\*\\*AI Pull Request Summary:\\*\\*(?:\\n|: )(.*)', comment, re.DOTALL)
+if match:
+    summary = match.group(1).strip()
+    print(summary)
+else:
+    print(comment)
+")
 
           echo "Extracted AI Summary: $AI_SUMMARY"
 
