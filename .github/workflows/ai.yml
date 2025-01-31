@@ -225,7 +225,7 @@ jobs:
         run: |
           AI_SUMMARY="${{ steps.fetch_ai_summary.outputs.ai_summary }}"
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}}"
+          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
 
           PAYLOAD=$(jq -n \
             --arg title "AI Pull Request Summary for PR #$PR_NUMBER" \
