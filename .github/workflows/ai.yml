@@ -247,7 +247,7 @@ jobs:
         run: |
           AI_SUMMARY="${{ steps.fetch_ai_summary.outputs.ai_summary }}"
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER }}"
+          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
           PR_TITLE="${{ steps.fetch_pr_details.outputs.pr_title }}"
           PR_CREATOR="${{ steps.fetch_pr_details.outputs.pr_creator }}"
           REPO_FULL_NAME="${{ steps.fetch_pr_details.outputs.repo_full_name }}"
@@ -261,6 +261,7 @@ jobs:
             --arg creator "📅 Created By: ${PR_CREATOR}" \
             --arg changes "${FILES_CHANGED} files modified" \
             --arg summary "${AI_SUMMARY}" \
+            --arg pr_link "${PR_LINK}" \
             '{
               "@type": "MessageCard",
               "@context": "http://schema.org/extensions",
