@@ -29,7 +29,9 @@ jobs:
         id: read_readme
         run: |
           README_CONTENT=$(cat README.md)
-          echo "::set-output name=README::$README_CONTENT"
+          echo "README<<EOF" >> $GITHUB_OUTPUT
+          echo "$README_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Set Up Python
         uses: actions/setup-python@v4
@@ -51,7 +53,6 @@ jobs:
           import os
           import requests
           import json
-          import re
 
           event_path = os.environ.get('GITHUB_EVENT_PATH')
           with open(event_path, 'r') as f:
@@ -108,7 +109,7 @@ jobs:
           summary_response.raise_for_status()
           summary = summary_response.json()['choices'][0]['message']['content'].strip()
 
-          # Post summary as PR comment (unchanged format)
+          # Post summary as PR comment
           comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
           summary_comment = {
               "body": f"**AI Pull Request Summary:**\\n{summary}"
@@ -121,7 +122,12 @@ jobs:
   send_to_teams:
     name: "Send AI Summary to Teams"
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: >
+      github.event_name == 'push' &&
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/master'
+      )
     steps:
       - name: Checkout Code (Optional)
         uses: actions/checkout@v3
@@ -192,7 +198,6 @@ jobs:
           echo "Found AI Pull Request Summary comment."
 
           # Extract the summary text after the keyword
-          # Assuming the format: "**AI Pull Request Summary:**\n<summary text>"
           AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/\*\*AI Pull Request Summary:\*\*/, $p' | sed '1d')
 
           # Fallback if the format is different
@@ -202,7 +207,7 @@ jobs:
 
           echo "Extracted AI Summary: $AI_SUMMARY"
 
-          # Save the AI summary to output
+          # Save the AI summary to output using GITHUB_OUTPUT
           echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
           echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -211,8 +216,7 @@ jobs:
         if: steps.fetch_ai_summary.outputs.ai_summary != ''
         run: |
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          echo "AI Pull Request Summary for PR #${PR_NUMBER}:"
-          echo "${{ steps.fetch_ai_summary.outputs.ai_summary }}"
+          printf "AI Pull Request Summary for PR #%s:\n%s\n" "$PR_NUMBER" "${{ steps.fetch_ai_summary.outputs.ai_summary }}"
 
       - name: Send AI Summary to Teams
         if: steps.fetch_ai_summary.outputs.ai_summary != ''
@@ -221,7 +225,7 @@ jobs:
         run: |
           AI_SUMMARY="${{ steps.fetch_ai_summary.outputs.ai_summary }}"
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}}"
 
           PAYLOAD=$(jq -n \
             --arg title "AI Pull Request Summary for PR #$PR_NUMBER" \
@@ -253,7 +257,9 @@ jobs:
         id: read_readme_review
         run: |
           README_CONTENT=$(cat README.md)
-          echo "::set-output name=README::$README_CONTENT"
+          echo "README<<EOF" >> $GITHUB_OUTPUT
+          echo "$README_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: AI Code Review
         uses: PierreGode/GPTcode-reviewer@main
