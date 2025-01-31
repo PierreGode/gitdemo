@@ -193,7 +193,7 @@ jobs:
 
           # Extract the summary text after the keyword
           # Assuming the format: "**AI Pull Request Summary:**\n<summary text>"
-          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/\*\*AI Pull Request Summary:\*\*/,/^$/p' | sed '1d' | sed '/^$/d')
+          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/\\*\\*AI Pull Request Summary:\\*\\*/,/^$/p' | sed '1d' | sed '/^$/d')
 
           # Fallback if the format is different
           if [ -z "$AI_SUMMARY" ]; then
