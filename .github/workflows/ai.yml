@@ -116,6 +116,54 @@ jobs:
           requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
 
           print("PR Summary posted successfully.")
+
+          # --- POST-PROCESSING FOR TEAMS ONLY ---
+          # Remove Markdown heading symbols to avoid large heading sizes in Teams.
+          summary_for_teams = re.sub(r'^(#{1,6})\s+', '', summary, flags=re.MULTILINE)
+
+          # Prepare Enhanced Teams Payload (structure unchanged, but use summary_for_teams)
+          teams_payload = {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": "0076D7",
+              "summary": "New AI PR Summary",
+              "sections": [
+                  {
+                      "activityTitle": "**📝 AI-Generated PR Summary**",
+                      "activitySubtitle": f"📂 Repository: **{repo_full_name}**",
+                      "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+                      "facts": [
+                          { "name": "🔖 Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
+                          { "name": "📅 Created By", "value": f"{event['pull_request']['user']['login']}" },
+                          { "name": "📈 Changes", "value": f"{len(pr_files)} files modified" }
+                      ],
+                      "markdown": True
+                  },
+                  {
+                      "title": "📄 **Summary**",
+                      "text": f"{summary_for_teams}",
+                      "markdown": True
+                  },
+                  {
+                      "potentialAction": [
+                          {
+                              "@type": "OpenUri",
+                              "name": "🔗 View on GitHub",
+                              "targets": [
+                                  { "os": "default", "uri": pr_url }
+                              ]
+                          }
+                      ]
+                  }
+              ]
+          }
+
+          # Send Enhanced Teams Payload
+          teams_headers = {"Content-Type": "application/json"}
+          response = requests.post(teams_webhook_url, headers=teams_headers, json=teams_payload)
+          response.raise_for_status()
+
+          print("PR Summary sent to Microsoft Teams successfully.")
           EOF
 
   send_to_teams:
@@ -193,7 +241,7 @@ jobs:
 
           # Extract the summary text after the keyword
           # Assuming the format: "**AI Pull Request Summary:**\n<summary text>"
-          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/**AI Pull Request Summary:**/,/^$/p' | sed '1d' | sed '/^$/d')
+          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/\*\*AI Pull Request Summary:\*\*/,/^$/p' | sed '1d' | sed '/^$/d')
 
           # Fallback if the format is different
           if [ -z "$AI_SUMMARY" ]; then
