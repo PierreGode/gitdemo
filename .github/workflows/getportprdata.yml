@@ -1,0 +1,22 @@
+name: Find PR from a commit
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  get-pr-info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v2
+        
+      - name: Lookup associated PR
+        run: |
+          echo "Commit SHA: $GITHUB_SHA"
+          prs=$(curl \
+            -H "Accept: application/vnd.github.groot-preview+json" \
+            -s \
+            "https://api.github.com/repos/${{ github.repository }}/commits/${GITHUB_SHA}/pulls")
+          
+          echo "Pull request data: $prs"
