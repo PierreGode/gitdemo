@@ -1,4 +1,4 @@
-name: PR summary by AI
+name: "PR Summary by AI"
 
 on:
   pull_request:
@@ -6,6 +6,10 @@ on:
       - opened
       - synchronize
       - reopened
+  push:
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
@@ -14,8 +18,9 @@ permissions:
 
 jobs:
   pr_summary:
-    name: PR Summary
+    name: "PR Summary"
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -41,7 +46,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
           README_CONTENT: ${{ steps.read_readme.outputs.README }}
-          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
           python - <<EOF
           import os
@@ -60,7 +64,6 @@ jobs:
           token = os.environ.get('GITHUB_TOKEN')
           openai_key = os.environ.get('OPENAI_API_KEY')
           readme_content = os.environ.get('README_CONTENT')
-          teams_webhook_url = os.environ.get('TEAMS_WEBHOOK_URL')
 
           headers = {
               'Authorization': f'token {token}',
@@ -113,59 +116,135 @@ jobs:
           requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
 
           print("PR Summary posted successfully.")
-
-          # --- POST-PROCESSING FOR TEAMS ONLY ---
-          # Remove Markdown heading symbols to avoid large heading sizes in Teams.
-          summary_for_teams = re.sub(r'^(#{1,6})\s+', '', summary, flags=re.MULTILINE)
-
-          # Prepare Enhanced Teams Payload (structure unchanged, but use summary_for_teams)
-          teams_payload = {
-              "@type": "MessageCard",
-              "@context": "http://schema.org/extensions",
-              "themeColor": "0076D7",
-              "summary": "New AI PR Summary",
-              "sections": [
-                  {
-                      "activityTitle": "**📝 AI-Generated PR Summary**",
-                      "activitySubtitle": f"📂 Repository: **{repo_full_name}**",
-                      "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-                      "facts": [
-                          { "name": "🔖 Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
-                          { "name": "📅 Created By", "value": f"{event['pull_request']['user']['login']}" },
-                          { "name": "📈 Changes", "value": f"{len(pr_files)} files modified" }
-                      ],
-                      "markdown": True
-                  },
-                  {
-                      "title": "📄 **Summary**",
-                      "text": f"{summary_for_teams}",
-                      "markdown": True
-                  },
-                  {
-                      "potentialAction": [
-                          {
-                              "@type": "OpenUri",
-                              "name": "🔗 View on GitHub",
-                              "targets": [
-                                  { "os": "default", "uri": pr_url }
-                              ]
-                          }
-                      ]
-                  }
-              ]
-          }
-
-          # Send Enhanced Teams Payload
-          teams_headers = {"Content-Type": "application/json"}
-          response = requests.post(teams_webhook_url, headers=teams_headers, json=teams_payload)
-          response.raise_for_status()
-
-          print("PR Summary sent to Microsoft Teams successfully.")
           EOF
 
-  code_review:
-    name: AI Code Review
+  send_to_teams:
+    name: "Send AI Summary to Teams"
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    steps:
+      - name: Checkout Code (Optional)
+        uses: actions/checkout@v3
+
+      - name: Identify Merged PR
+        id: find_pr
+        run: |
+          COMMIT_SHA="${{ github.sha }}"
+          echo "Commit SHA: $COMMIT_SHA"
+
+          # Call GitHub API to list any pull requests containing this commit
+          PR_INFO=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/commits/${COMMIT_SHA}/pulls")
+
+          echo "Raw PR info: $PR_INFO"
+
+          # Extract the first PR number from the array
+          PR_NUMBER=$(echo "$PR_INFO" | jq -r '.[0].number // empty')
+
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "No PR found for commit $COMMIT_SHA."
+            echo "pr_number=" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "Found PR #$PR_NUMBER"
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Print PR Details
+        run: |
+          PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No PR number retrieved, skipping..."
+            exit 0
+          fi
+
+          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+          echo "Merged PR: #${PR_NUMBER}"
+          echo "PR Link : ${PR_LINK}"
+
+      - name: Fetch AI Pull Request Summary Comment
+        if: steps.find_pr.outputs.pr_number != ''
+        id: fetch_ai_summary
+        run: |
+          PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+          echo "Fetching comments for PR #${PR_NUMBER}..."
+
+          # Fetch issue comments (comments on the PR conversation)
+          COMMENTS=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments")
+
+          echo "Raw comments: $COMMENTS"
+
+          # Extract the comment containing "AI Pull Request Summary"
+          AI_SUMMARY_COMMENT=$(echo "$COMMENTS" | \
+            jq -r '.[] | select(.body | contains("AI Pull Request Summary")) | .body')
+
+          if [ -z "$AI_SUMMARY_COMMENT" ]; then
+            echo "No comment containing 'AI Pull Request Summary' found."
+            echo "ai_summary=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Found AI Pull Request Summary comment."
+
+          # Extract the summary text after the keyword
+          # Assuming the format: "**AI Pull Request Summary:**\n<summary text>"
+          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/**AI Pull Request Summary:**/,/^$/p' | sed '1d' | sed '/^$/d')
+
+          # Fallback if the format is different
+          if [ -z "$AI_SUMMARY" ]; then
+            AI_SUMMARY="$AI_SUMMARY_COMMENT"
+          fi
+
+          echo "Extracted AI Summary: $AI_SUMMARY"
+
+          # Save the AI summary to output
+          echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
+          echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Print AI Pull Request Summary
+        if: steps.fetch_ai_summary.outputs.ai_summary != ''
+        run: |
+          PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+          echo "AI Pull Request Summary for PR #${PR_NUMBER}:"
+          echo "${{ steps.fetch_ai_summary.outputs.ai_summary }}"
+
+      - name: Send AI Summary to Teams
+        if: steps.fetch_ai_summary.outputs.ai_summary != ''
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          AI_SUMMARY="${{ steps.fetch_ai_summary.outputs.ai_summary }}"
+          PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+          PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+
+          PAYLOAD=$(jq -n \
+            --arg title "AI Pull Request Summary for PR #$PR_NUMBER" \
+            --arg text "$AI_SUMMARY\n\n[View PR]($PR_LINK)" \
+            '{
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "summary": $title,
+              "title": $title,
+              "text": $text
+            }')
+
+          # Send the payload to the Teams webhook
+          curl -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$TEAMS_WEBHOOK_URL"
+
+          echo "PR Summary sent to Microsoft Teams successfully."
+
+  code_review:
+    name: "AI Code Review"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -184,4 +263,3 @@ jobs:
           OPENAI_API_MODEL: "gpt-4o-mini"
           exclude: "**/*.json,**/*.md"
           additional_context: ${{ steps.read_readme_review.outputs.README }}
-          
