@@ -234,7 +234,7 @@ jobs:
 
           echo "Found AI Pull Request Summary comment."
 
-          # Optionally, extract the summary text after the keyword
+          # Extract the summary text after the keyword
           AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/AI Pull Request Summary:/,/^$/p' | sed '1d' | sed '/^$/d')
 
           if [ -z "$AI_SUMMARY" ]; then
@@ -243,16 +243,16 @@ jobs:
 
           echo "Extracted AI Summary: $AI_SUMMARY"
 
-          echo "ai_summary<<EOF" >> $GITHUB_ENV
-          echo "$AI_SUMMARY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          # Correctly append AI summary to the environment variable
+          echo "ai_summary=$AI_SUMMARY" >> $GITHUB_ENV
 
       - name: Post AI Summary to Teams
         if: steps.fetch_comments.outputs.ai_summary != ''
         run: |
-          AI_SUMMARY="${{ steps.fetch_comments.outputs.ai_summary }}"
+          AI_SUMMARY="${{ env.ai_summary }}"
           echo "Posting AI summary to Teams..."
 
+          # Remove Markdown heading symbols to avoid large heading sizes in Teams
           summary_for_teams=$(echo "$AI_SUMMARY" | sed 's/^#\+ //g')
 
           teams_payload=$(cat <<EOF
