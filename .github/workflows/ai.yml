@@ -49,15 +49,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
           README_CONTENT: ${{ steps.read_readme.outputs.README }}
         run: |
-          python - <<EOF
+          python - <<'EOF'
           import os
           import requests
           import json
-          import re
 
           # Load event data
-          event_path = os.environ.get('GITHUB_EVENT_PATH')
-          with open(event_path, 'r') as f:
+          with open(os.environ['GITHUB_EVENT_PATH'], 'r') as f:
               event = json.load(f)
 
           # Extract necessary information
@@ -65,9 +63,9 @@ jobs:
           pr_title = event['pull_request']['title']
           repo_full_name = event['repository']['full_name']
           pr_url = event['pull_request']['html_url']
-          token = os.environ.get('GITHUB_TOKEN')
-          openai_key = os.environ.get('OPENAI_API_KEY')
-          readme_content = os.environ.get('README_CONTENT')
+          token = os.environ['GITHUB_TOKEN']
+          openai_key = os.environ['OPENAI_API_KEY']
+          readme_content = os.environ['README_CONTENT']
 
           # Fetch PR diffs
           headers = {
@@ -116,13 +114,13 @@ jobs:
           summary_response.raise_for_status()
           summary = summary_response.json()['choices'][0]['message']['content'].strip()
 
-          # Post summary as PR comment
+          # Post summary as PR comment with a trailing newline for easier extraction later
           comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
           summary_comment = {
               "body": f"**AI Pull Request Summary:**\n{summary}\n\n"
           }
-          requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
-
+          response = requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
+          response.raise_for_status()
           print("PR Summary posted successfully.")
           EOF
 
@@ -168,6 +166,7 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/commits/${COMMIT_SHA}/pulls")
 
           PR_NUMBER=$(echo "$PR_INFO" | jq -r '.[0].number // empty')
+          PR_TITLE=$(echo "$PR_INFO" | jq -r '.[0].title // "Title not available"')
 
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
             echo "No PR found for commit $COMMIT_SHA."
@@ -176,6 +175,7 @@ jobs:
           else
             echo "Found PR #$PR_NUMBER"
             echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
           fi
 
       - name: Fetch PR Comments
@@ -203,6 +203,7 @@ jobs:
             exit 0
           fi
 
+          # Extract everything between the header and the first empty line
           AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/AI Pull Request Summary:/,/^$/p' | sed '1d' | sed '/^$/d')
 
           echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
@@ -214,49 +215,49 @@ jobs:
         run: |
           AI_SUMMARY="${{ steps.fetch_comments.outputs.ai_summary }}"
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+          PR_TITLE="${{ steps.find_pr.outputs.pr_title }}"
           PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
           REPO_NAME="${{ github.repository }}"
-          
-          # Prepare Teams message
+
           SUMMARY_FOR_TEAMS=$(echo "$AI_SUMMARY" | sed 's/^#\+ //')
 
           TEAMS_PAYLOAD=$(cat <<EOF
-          {
-            "@type": "MessageCard",
-            "@context": "http://schema.org/extensions",
-            "themeColor": "0076D7",
-            "summary": "New AI PR Summary",
-            "sections": [
-              {
-                "activityTitle": "**📝 AI-Generated PR Summary**",
-                "activitySubtitle": "📂 Repository: **$REPO_NAME**",
-                "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-                "facts": [
-                  { "name": "🔖 Pull Request", "value": "[${pr_title} (PR #${PR_NUMBER})](${PR_URL})" },
-                  { "name": "📅 Created By", "value": "${{ github.actor }}" },
-                  { "name": "📈 Changes", "value": "Files modified" }
-                ],
-                "markdown": true
-              },
-              {
-                "title": "📄 **Summary**",
-                "text": "$SUMMARY_FOR_TEAMS",
-                "markdown": true
-              },
-              {
-                "potentialAction": [
-                  {
-                    "@type": "OpenUri",
-                    "name": "🔗 View on GitHub",
-                    "targets": [
-                      { "os": "default", "uri": "$PR_URL" }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-          EOF
-          )
+{
+  "@type": "MessageCard",
+  "@context": "http://schema.org/extensions",
+  "themeColor": "0076D7",
+  "summary": "New AI PR Summary",
+  "sections": [
+    {
+      "activityTitle": "**📝 AI-Generated PR Summary**",
+      "activitySubtitle": "📂 Repository: **$REPO_NAME**",
+      "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+      "facts": [
+        { "name": "🔖 Pull Request", "value": "[$PR_TITLE (PR #$PR_NUMBER)]($PR_URL)" },
+        { "name": "📅 Created By", "value": "${{ github.actor }}" },
+        { "name": "📈 Changes", "value": "Files modified" }
+      ],
+      "markdown": true
+    },
+    {
+      "title": "📄 **Summary**",
+      "text": "$SUMMARY_FOR_TEAMS",
+      "markdown": true
+    },
+    {
+      "potentialAction": [
+        {
+          "@type": "OpenUri",
+          "name": "🔗 View on GitHub",
+          "targets": [
+            { "os": "default", "uri": "$PR_URL" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+)
 
           curl -X POST -H "Content-Type: application/json" -d "$TEAMS_PAYLOAD" ${{ secrets.TEAMS_WEBHOOK_URL }}
