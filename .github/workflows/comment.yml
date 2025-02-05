@@ -3,9 +3,7 @@ name: Minimal PR Comment
 on:
   pull_request:
     types:
-      - opened
-      - synchronize
-      - reopened
+      - none
 
 permissions:
   contents: read
