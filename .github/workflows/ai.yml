@@ -48,6 +48,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
           README_CONTENT: ${{ steps.read_readme.outputs.README }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
           python - <<EOF
           import os
@@ -68,6 +69,7 @@ jobs:
           token = os.environ.get('GITHUB_TOKEN')
           openai_key = os.environ.get('OPENAI_API_KEY')
           readme_content = os.environ.get('README_CONTENT')
+          teams_webhook_url = os.environ.get('TEAMS_WEBHOOK_URL')
 
           # Fetch PR diffs
           headers = {
@@ -124,6 +126,54 @@ jobs:
           requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
 
           print("PR Summary posted successfully.")
+
+          # --- POST-PROCESSING FOR TEAMS ONLY ---
+          # Remove Markdown heading symbols to avoid large heading sizes in Teams.
+          summary_for_teams = re.sub(r'^(#{1,6})\s+', '', summary, flags=re.MULTILINE)
+
+          # Prepare Enhanced Teams Payload
+          teams_payload = {
+              "@type": "MessageCard",
+              "@context": "http://schema.org/extensions",
+              "themeColor": "0076D7",
+              "summary": "New AI PR Summary",
+              "sections": [
+                  {
+                      "activityTitle": "**📝 AI-Generated PR Summary**",
+                      "activitySubtitle": f"📂 Repository: **{repo_full_name}**",
+                      "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+                      "facts": [
+                          { "name": "🔖 Pull Request", "value": f"[{pr_title} (#{pr_number})]({pr_url})" },
+                          { "name": "📅 Created By", "value": f"{event['pull_request']['user']['login']}" },
+                          { "name": "📈 Changes", "value": f"{len(pr_files)} files modified" }
+                      ],
+                      "markdown": True
+                  },
+                  {
+                      "title": "📄 **Summary**",
+                      "text": f"{summary_for_teams}",
+                      "markdown": True
+                  },
+                  {
+                      "potentialAction": [
+                          {
+                              "@type": "OpenUri",
+                              "name": "🔗 View on GitHub",
+                              "targets": [
+                                  { "os": "default", "uri": pr_url }
+                              ]
+                          }
+                      ]
+                  }
+              ]
+          }
+
+          # Send Enhanced Teams Payload
+          teams_headers = {"Content-Type": "application/json"}
+          response = requests.post(teams_webhook_url, headers=teams_headers, json=teams_payload)
+          response.raise_for_status()
+
+          print("PR Summary sent to Microsoft Teams successfully.")
           EOF
 
   code_review:
@@ -249,45 +299,9 @@ jobs:
           echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Post AI Summary to Teams
+      - name: Print AI Pull Request Summary
         if: steps.fetch_comments.outputs.ai_summary != ''
         run: |
-          AI_SUMMARY="${{ steps.fetch_comments.outputs.ai_summary }}"
-          echo "Posting AI summary to Teams..."
-
-          # Remove Markdown heading symbols to avoid large heading sizes in Teams.
-          summary_for_teams=$(echo "$AI_SUMMARY" | sed 's/^#\+ //g')
-
-          # Prepare Enhanced Teams Payload
-          teams_payload=$(cat <<EOF
-          {
-            "@type": "MessageCard",
-            "@context": "http://schema.org/extensions",
-            "themeColor": "0076D7",
-            "summary": "New AI PR Summary",
-            "sections": [
-              {
-                "activityTitle": "**📝 AI-Generated PR Summary**",
-                "activitySubtitle": "📂 Repository: **${{ github.repository }}**",
-                "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-                "facts": [
-                  { "name": "🔖 Pull Request", "value": "[${{ steps.find_pr.outputs.pr_number }}]($PR_LINK)" },
-                  { "name": "📅 Created By", "value": "${{ github.actor }}" },
-                  { "name": "📈 Changes", "value": "AI-generated PR Summary" }
-                ],
-                "markdown": true
-              },
-              {
-                "title": "📄 **Summary**",
-                "text": "$summary_for_teams",
-                "markdown": true
-              }
-            ]
-          }
-          EOF
-          )
-
-          # Send Enhanced Teams Payload
-          teams_headers="Content-Type: application/json"
-          response=$(curl -s -X POST "$TEAMS_WEBHOOK_URL" -H "$teams_headers" -d "$teams_payload")
-          echo "PR Summary sent to Microsoft Teams successfully."
+          PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+          echo "AI Pull Request Summary for PR #${PR_NUMBER}:"
+          echo "${{ steps.fetch_comments.outputs.ai_summary }}"
