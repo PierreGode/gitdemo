@@ -49,82 +49,68 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
           README_CONTENT: ${{ env.README }}
         run: |
-          python - <<EOF
-          import os
-          import requests
-          import json
-          import re
+          python - <<'EOF'
+import os, requests, json, re
+# Load event data
+with open(os.environ.get('GITHUB_EVENT_PATH'), 'r') as f:
+    event = json.load(f)
 
-          # Load event data
-          event_path = os.environ.get('GITHUB_EVENT_PATH')
-          with open(event_path, 'r') as f:
-              event = json.load(f)
+pr_number = event['pull_request']['number']
+repo_full_name = event['repository']['full_name']
+token = os.environ.get('GITHUB_TOKEN')
+openai_key = os.environ.get('OPENAI_API_KEY')
+readme_content = os.environ.get('README_CONTENT')
 
-          # Extract necessary information
-          pr_number = event['pull_request']['number']
-          pr_title = event['pull_request']['title']
-          repo_full_name = event['repository']['full_name']
-          pr_url = event['pull_request']['html_url']
-          token = os.environ.get('GITHUB_TOKEN')
-          openai_key = os.environ.get('OPENAI_API_KEY')
-          readme_content = os.environ.get('README_CONTENT')
+# Fetch PR diffs
+headers = {
+    'Authorization': f'token {token}',
+    'Accept': 'application/vnd.github.v3.diff',
+}
+diff_url = f"{event['pull_request']['url']}/files"
+pr_files = requests.get(diff_url, headers=headers).json()
 
-          # Fetch PR diffs
-          headers = {
-              'Authorization': f'token {token}',
-              'Accept': 'application/vnd.github.v3.diff',
-          }
-          diff_url = f"{event['pull_request']['url']}/files"
-          pr_files = requests.get(diff_url, headers=headers).json()
+diff_text = ""
+for fdata in pr_files:
+    filename = fdata['filename']
+    patch = fdata.get('patch', 'No changes')
+    diff_text += f"File: {filename}\nPatch:\n"
+    for line in patch.split('\\n'):
+        if line.startswith('+') and not line.startswith('+++'):
+            diff_text += f"Added: {line[1:]}\n"
+        elif line.startswith('-') and not line.startswith('---'):
+            diff_text += f"Removed: {line[1:]}\n"
+        else:
+            diff_text += f"{line}\n"
 
-          # Process diffs
-          diff_text = ""
-          for fdata in pr_files:
-              filename = fdata['filename']
-              patch = fdata.get('patch', 'No changes')
-              diff_text += f"File: {filename}\nPatch:\n"
-              for line in patch.split('\\n'):
-                  if line.startswith('+') and not line.startswith('+++'):
-                      diff_text += f"Added: {line[1:]}\n"
-                  elif line.startswith('-') and not line.startswith('---'):
-                      diff_text += f"Removed: {line[1:]}\n"
-                  else:
-                      diff_text += f"{line}\n"
+summary_prompt = (
+    f"Analyze the following Pull Request Diff and summarize the changes. Use the following README as a basic understanding of the repository and its purpose to give a more precise pull request summary. Provide a comprehensive analysis of the pull request.\n\n"
+    f"**README Content:**\n{readme_content}\n\n"
+    f"**Pull Request Diff:**\n{diff_text}\n\n"
+    f"Please include the following in your summary:\n"
+    f"- Key files and components modified.\n"
+    f"- Main purpose of the changes (e.g., bug fixes, feature additions, optimizations).\n"
+    f"- Specific functionalities introduced, modified, or removed.\n"
+    f"  - Highlight lines added (marked with 'Added:') and lines removed (marked with 'Removed:').\n"
+    f"- Any potential implications or considerations (e.g., performance impacts, breaking changes, dependencies).\n"
+    f"Ensure the summary clearly states which version contains corrections or bug fixes."
+)
 
-          # Construct AI prompt
-          summary_prompt = (
-              f"Analyze the following Pull Request Diff and summarize the changes. Use the following README as a basic understanding of the repository and its purpose to give a more precise pull request summary. Provide a comprehensive analysis of the pull request.\n\n"
-              f"**README Content:**\n{readme_content}\n\n"
-              f"**Pull Request Diff:**\n{diff_text}\n\n"
-              f"Please include the following in your summary:\n"
-              f"- Key files and components modified.\n"
-              f"- Main purpose of the changes (e.g., bug fixes, feature additions, optimizations).\n"
-              f"- Specific functionalities introduced, modified, or removed.\n"
-              f"  - Highlight lines added (marked with 'Added:') and lines removed (marked with 'Removed:').\n"
-              f"- Any potential implications or considerations (e.g., performance impacts, breaking changes, dependencies).\n"
-              f"Ensure the summary clearly states which version contains corrections or bug fixes."
-          )
+ai_headers = {"Content-Type": "application/json", "Authorization": f"Bearer {openai_key}"}
+data_summary = {
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": summary_prompt}],
+    "temperature": 0.7
+}
+summary_response = requests.post("https://api.openai.com/v1/chat/completions", headers=ai_headers, json=data_summary)
+summary_response.raise_for_status()
+summary = summary_response.json()['choices'][0]['message']['content'].strip()
 
-          # Call OpenAI API
-          ai_headers = {"Content-Type": "application/json", "Authorization": f"Bearer {openai_key}"}
-          data_summary = {
-              "model": "gpt-4o-mini",
-              "messages": [{"role": "user", "content": summary_prompt}],
-              "temperature": 0.7
-          }
-          summary_response = requests.post("https://api.openai.com/v1/chat/completions", headers=ai_headers, json=data_summary)
-          summary_response.raise_for_status()
-          summary = summary_response.json()['choices'][0]['message']['content'].strip()
-
-          # Post summary as PR comment
-          comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
-          summary_comment = {
-              "body": f"**AI Pull Request Summary:**\n{summary}"
-          }
-          requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
-
-          print("PR Summary posted successfully.")
-          EOF
+# Post summary as a PR comment
+comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
+summary_comment = {"body": f"**AI Pull Request Summary:**\n{summary}"}
+requests.post(comment_url, headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}, json=summary_comment)
+print("PR Summary posted successfully.")
+EOF
 
   code_review:
     if: github.event_name == 'pull_request'
@@ -159,21 +145,14 @@ jobs:
       - name: Identify merged PR
         id: find_pr
         run: |
-          # The commit that just landed on 'main'
           COMMIT_SHA="${{ github.sha }}"
           echo "Commit SHA: $COMMIT_SHA"
-
-          # Call GitHub API to list any pull requests containing this commit
           PR_INFO=$(curl -s \
             -H "Accept: application/vnd.github.groot-preview+json" \
             -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/commits/${COMMIT_SHA}/pulls")
-
           echo "Raw PR info: $PR_INFO"
-
-          # Extract the first PR number from the array
           PR_NUMBER=$(echo "$PR_INFO" | jq -r '.[0].number // empty')
-
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
             echo "No PR found for commit $COMMIT_SHA."
             echo "pr_number=" >> $GITHUB_ENV
@@ -181,7 +160,8 @@ jobs:
           else
             echo "Found PR #$PR_NUMBER"
             echo "pr_number=$PR_NUMBER" >> $GITHUB_ENV
-            echo "::set-output name=pr_number::$PR_NUMBER" # This will make the PR number available to other steps
+            # Write to GITHUB_OUTPUT to pass the output to later steps
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           fi
 
       - name: Print PR details
@@ -191,11 +171,11 @@ jobs:
             echo "No PR number retrieved, skipping..."
             exit 0
           fi
-
           PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
-
           echo "Merged PR: #${PR_NUMBER}"
           echo "PR Link : ${PR_LINK}"
+          # Save PR_LINK for later steps
+          echo "PR_LINK=${PR_LINK}" >> $GITHUB_ENV
 
       - name: Fetch PR Comments
         if: steps.find_pr.outputs.pr_number != ''
@@ -203,47 +183,30 @@ jobs:
         run: |
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
           echo "Fetching comments for PR #${PR_NUMBER}..."
-
-          # Fetch issue comments (comments on the PR conversation)
           COMMENTS=$(curl -s \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments")
-
           echo "Raw comments: $COMMENTS"
-
-          # Check if there are any comments
           COMMENT_COUNT=$(echo "$COMMENTS" | jq 'length')
           echo "Number of comments: $COMMENT_COUNT"
-
           if [ "$COMMENT_COUNT" -eq 0 ]; then
             echo "No comments found for PR #${PR_NUMBER}."
             echo "ai_summary=" >> $GITHUB_ENV
             exit 0
           fi
-
-          # Extract the comment containing "AI Pull Request Summary"
-          AI_SUMMARY_COMMENT=$(echo "$COMMENTS" | \
-            jq -r '.[] | select(.body | contains("AI Pull Request Summary")) | .body')
-
+          AI_SUMMARY_COMMENT=$(echo "$COMMENTS" | jq -r '.[] | select(.body | contains("AI Pull Request Summary")) | .body')
           if [ -z "$AI_SUMMARY_COMMENT" ]; then
             echo "No comment containing 'AI Pull Request Summary' found."
             echo "ai_summary=" >> $GITHUB_ENV
             exit 0
           fi
-
           echo "Found AI Pull Request Summary comment."
-
-          # Extract the summary text after the keyword
           AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/AI Pull Request Summary:/,/^$/p' | sed '1d' | sed '/^$/d')
-
           if [ -z "$AI_SUMMARY" ]; then
             AI_SUMMARY="$AI_SUMMARY_COMMENT"
           fi
-
           echo "Extracted AI Summary: $AI_SUMMARY"
-
-          # Correctly append AI summary to the environment variable
           echo "ai_summary=$AI_SUMMARY" >> $GITHUB_ENV
 
       - name: Post AI Summary to Teams
@@ -251,38 +214,39 @@ jobs:
         run: |
           AI_SUMMARY="${{ env.ai_summary }}"
           echo "Posting AI summary to Teams..."
-
-          # Remove Markdown heading symbols to avoid large heading sizes in Teams
           summary_for_teams=$(echo "$AI_SUMMARY" | sed 's/^#\+ //g')
-
+          # Compute PR_LINK from environment if not already set
+          if [ -z "${PR_LINK}" ]; then
+            PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+            PR_LINK="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+          fi
           teams_payload=$(cat <<EOF
-          {
-            "@type": "MessageCard",
-            "@context": "http://schema.org/extensions",
-            "themeColor": "0076D7",
-            "summary": "New AI PR Summary",
-            "sections": [
-              {
-                "activityTitle": "**📝 AI-Generated PR Summary**",
-                "activitySubtitle": "📂 Repository: **${{ github.repository }}**",
-                "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-                "facts": [
-                  { "name": "🔖 Pull Request", "value": "[${{ steps.find_pr.outputs.pr_number }}]($PR_LINK)" },
-                  { "name": "📅 Created By", "value": "${{ github.actor }}" },
-                  { "name": "📈 Changes", "value": "AI-generated PR Summary" }
-                ],
-                "markdown": true
-              },
-              {
-                "title": "📄 **Summary**",
-                "text": "$summary_for_teams",
-                "markdown": true
-              }
-            ]
-          }
-          EOF
+{
+  "@type": "MessageCard",
+  "@context": "http://schema.org/extensions",
+  "themeColor": "0076D7",
+  "summary": "New AI PR Summary",
+  "sections": [
+    {
+      "activityTitle": "**📝 AI-Generated PR Summary**",
+      "activitySubtitle": "📂 Repository: **${{ github.repository }}**",
+      "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+      "facts": [
+        { "name": "🔖 Pull Request", "value": "[${{ steps.find_pr.outputs.pr_number }}](${PR_LINK})" },
+        { "name": "📅 Created By", "value": "${{ github.actor }}" },
+        { "name": "📈 Changes", "value": "AI-generated PR Summary" }
+      ],
+      "markdown": true
+    },
+    {
+      "title": "📄 **Summary**",
+      "text": "$summary_for_teams",
+      "markdown": true
+    }
+  ]
+}
+EOF
           )
-
           teams_headers="Content-Type: application/json"
           response=$(curl -s -X POST "$TEAMS_WEBHOOK_URL" -H "$teams_headers" -d "$teams_payload")
           echo "PR Summary sent to Microsoft Teams successfully."
