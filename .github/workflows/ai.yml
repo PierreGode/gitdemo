@@ -181,6 +181,7 @@ jobs:
           else
             echo "Found PR #$PR_NUMBER"
             echo "pr_number=$PR_NUMBER" >> $GITHUB_ENV
+            echo "::set-output name=pr_number::$PR_NUMBER" # This will make the PR number available to other steps
           fi
 
       - name: Print PR details
@@ -234,17 +235,14 @@ jobs:
           echo "Found AI Pull Request Summary comment."
 
           # Optionally, extract the summary text after the keyword
-          # Assuming the format: "AI Pull Request Summary:\n\n<summary text>"
           AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/AI Pull Request Summary:/,/^$/p' | sed '1d' | sed '/^$/d')
 
-          # Fallback if the format is different
           if [ -z "$AI_SUMMARY" ]; then
             AI_SUMMARY="$AI_SUMMARY_COMMENT"
           fi
 
           echo "Extracted AI Summary: $AI_SUMMARY"
 
-          # Save the AI summary to output
           echo "ai_summary<<EOF" >> $GITHUB_ENV
           echo "$AI_SUMMARY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -255,10 +253,8 @@ jobs:
           AI_SUMMARY="${{ steps.fetch_comments.outputs.ai_summary }}"
           echo "Posting AI summary to Teams..."
 
-          # Remove Markdown heading symbols to avoid large heading sizes in Teams.
           summary_for_teams=$(echo "$AI_SUMMARY" | sed 's/^#\+ //g')
 
-          # Prepare Enhanced Teams Payload
           teams_payload=$(cat <<EOF
           {
             "@type": "MessageCard",
@@ -287,7 +283,6 @@ jobs:
           EOF
           )
 
-          # Send Enhanced Teams Payload
           teams_headers="Content-Type: application/json"
           response=$(curl -s -X POST "$TEAMS_WEBHOOK_URL" -H "$teams_headers" -d "$teams_payload")
           echo "PR Summary sent to Microsoft Teams successfully."
