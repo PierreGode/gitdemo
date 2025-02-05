@@ -151,112 +151,114 @@ jobs:
           exclude: "**/*.json,**/*.md"
           additional_context: ${{ steps.read_readme_review.outputs.README }}
 
-  post_merge:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    name: "Post-Merge PR Info with AI Summary"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Identify merged PR
-        id: find_pr
-        run: |
-          COMMIT_SHA="${{ github.sha }}"
-          echo "Commit SHA: $COMMIT_SHA"
+post_merge:
+  if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+  name: "Post-Merge PR Info with AI Summary"
+  runs-on: ubuntu-latest
+  steps:
+    - name: Identify merged PR
+      id: find_pr
+      run: |
+        COMMIT_SHA="${{ github.sha }}"
+        echo "Commit SHA: $COMMIT_SHA"
+    
+        PR_INFO=$(curl -s \
+          -H "Accept: application/vnd.github.groot-preview+json" \
+          -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
+          "https://api.github.com/repos/${{ github.repository }}/commits/${COMMIT_SHA}/pulls")
+    
+        PR_NUMBER=$(echo "$PR_INFO" | jq -r '.[0].number // empty')
+    
+        if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+          echo "No PR found for commit $COMMIT_SHA."
+          echo "pr_number=" >> $GITHUB_OUTPUT
+          exit 0
+        else
+          echo "Found PR #$PR_NUMBER"
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+        fi
 
-          PR_INFO=$(curl -s \
-            -H "Accept: application/vnd.github.groot-preview+json" \
-            -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/commits/${COMMIT_SHA}/pulls")
+    - name: Fetch PR Comments
+      if: steps.find_pr.outputs.pr_number != ''
+      id: fetch_comments
+      run: |
+        PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+        COMMENTS=$(curl -s \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
+          "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments")
+    
+        COMMENT_COUNT=$(echo "$COMMENTS" | jq 'length')
+        if [ "$COMMENT_COUNT" -eq 0 ]; then
+          echo "No comments found for PR #${PR_NUMBER}."
+          echo "ai_summary=" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+    
+        AI_SUMMARY_COMMENT=$(echo "$COMMENTS" | jq -r '.[] | select(.body | contains("AI Pull Request Summary")) | .body')
+    
+        if [ -z "$AI_SUMMARY_COMMENT" ]; then
+          echo "No comment containing 'AI Pull Request Summary' found."
+          echo "ai_summary=" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+    
+        # Extract everything after the header "AI Pull Request Summary:"
+        AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed 's/.*AI Pull Request Summary:\s*//')
+    
+        echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
+        echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
 
-          PR_NUMBER=$(echo "$PR_INFO" | jq -r '.[0].number // empty')
-
-          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
-            echo "No PR found for commit $COMMIT_SHA."
-            echo "pr_number=" >> $GITHUB_OUTPUT
-            exit 0
-          else
-            echo "Found PR #$PR_NUMBER"
-            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Fetch PR Comments
-        if: steps.find_pr.outputs.pr_number != ''
-        id: fetch_comments
-        run: |
-          PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          COMMENTS=$(curl -s \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments")
-
-          COMMENT_COUNT=$(echo "$COMMENTS" | jq 'length')
-          if [ "$COMMENT_COUNT" -eq 0 ]; then
-            echo "No comments found for PR #${PR_NUMBER}."
-            echo "ai_summary=" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          AI_SUMMARY_COMMENT=$(echo "$COMMENTS" | jq -r '.[] | select(.body | contains("AI Pull Request Summary")) | .body')
-
-          if [ -z "$AI_SUMMARY_COMMENT" ]; then
-            echo "No comment containing 'AI Pull Request Summary' found."
-            echo "ai_summary=" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed 's/.*AI Pull Request Summary:\s*//')
-
-          echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
-          echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Send AI Summary to Teams
-        if: steps.fetch_comments.outputs.ai_summary != ''
-        run: |
-          AI_SUMMARY="${{ steps.fetch_comments.outputs.ai_summary }}"
-          PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
-          REPO_NAME="${{ github.repository }}"
-          
-          # Prepare Teams message
-          SUMMARY_FOR_TEAMS=$(echo "$AI_SUMMARY" | sed 's/^#\+ //')
-
-          TEAMS_PAYLOAD=$(cat <<EOF
-          {
-            "@type": "MessageCard",
-            "@context": "http://schema.org/extensions",
-            "themeColor": "0076D7",
-            "summary": "New AI PR Summary",
-            "sections": [
-              {
-                "activityTitle": "**📝 AI-Generated PR Summary**",
-                "activitySubtitle": "📂 Repository: **$REPO_NAME**",
-                "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-                "facts": [
-                  { "name": "🔖 Pull Request", "value": "[${pr_title} (PR #${PR_NUMBER})](${PR_URL})" },
-                  { "name": "📅 Created By", "value": "${{ github.actor }}" },
-                  { "name": "📈 Changes", "value": "Files modified" }
-                ],
-                "markdown": true
-              },
-              {
-                "title": "📄 **Summary**",
-                "text": "$SUMMARY_FOR_TEAMS",
-                "markdown": true
-              },
-              {
-                "potentialAction": [
-                  {
-                    "@type": "OpenUri",
-                    "name": "🔗 View on GitHub",
-                    "targets": [
-                      { "os": "default", "uri": "$PR_URL" }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-          EOF
-          )
-
-          curl -X POST -H "Content-Type: application/json" -d "$TEAMS_PAYLOAD" ${{ secrets.TEAMS_WEBHOOK_URL }}
+    - name: Send AI Summary to Teams
+      if: steps.fetch_comments.outputs.ai_summary != ''
+      run: |
+        # Use the extracted summary and known variables
+        AI_SUMMARY="${{ steps.fetch_comments.outputs.ai_summary }}"
+        PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
+        PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
+        REPO_NAME="${{ github.repository }}"
+        
+        # Prepare Teams message
+        SUMMARY_FOR_TEAMS=$(echo "$AI_SUMMARY" | sed 's/^#\+ //')
+    
+        TEAMS_PAYLOAD=$(cat <<EOF
+{
+  "@type": "MessageCard",
+  "@context": "http://schema.org/extensions",
+  "themeColor": "0076D7",
+  "summary": "New AI PR Summary",
+  "sections": [
+    {
+      "activityTitle": "**📝 AI-Generated PR Summary**",
+      "activitySubtitle": "📂 Repository: **${REPO_NAME}**",
+      "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+      "facts": [
+        { "name": "🔖 Pull Request", "value": "[PR #${PR_NUMBER}](${PR_URL})" },
+        { "name": "📅 Created By", "value": "${GITHUB_ACTOR}" },
+        { "name": "📈 Changes", "value": "Files modified" }
+      ],
+      "markdown": true
+    },
+    {
+      "title": "📄 **Summary**",
+      "text": "$SUMMARY_FOR_TEAMS",
+      "markdown": true
+    },
+    {
+      "potentialAction": [
+        {
+          "@type": "OpenUri",
+          "name": "🔗 View on GitHub",
+          "targets": [
+            { "os": "default", "uri": "${PR_URL}" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+        )
+    
+        curl -X POST -H "Content-Type: application/json" -d "$TEAMS_PAYLOAD" "${{ secrets.TEAMS_WEBHOOK_URL }}"
