@@ -260,4 +260,3 @@ jobs:
           )
 
           curl -X POST -H "Content-Type: application/json" -d "$TEAMS_PAYLOAD" ${{ secrets.TEAMS_WEBHOOK_URL }}
-          
