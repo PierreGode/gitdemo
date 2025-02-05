@@ -1,4 +1,4 @@
-# Gitdemo Pierre 2025
+# Gitdemo Pierre
 
 ## Installation
 
