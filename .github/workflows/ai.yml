@@ -203,7 +203,7 @@ jobs:
             exit 0
           fi
 
-          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed -n '/AI Pull Request Summary:/,/^$/p' | sed '1d' | sed '/^$/d')
+          AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed 's/.*AI Pull Request Summary:\s*//')
 
           echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
           echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
