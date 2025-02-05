@@ -203,6 +203,7 @@ jobs:
             exit 0
           fi
 
+          # Remove the header and capture only the summary text.
           AI_SUMMARY=$(echo "$AI_SUMMARY_COMMENT" | sed 's/.*AI Pull Request Summary:\s*//')
 
           echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
@@ -216,47 +217,49 @@ jobs:
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
           PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
           REPO_NAME="${{ github.repository }}"
-          
-          # Prepare Teams message
+          # Set a placeholder PR title since it is not available in this context.
+          pr_title="Merged PR"
+
+          # Prepare Teams message by removing any markdown header characters.
           SUMMARY_FOR_TEAMS=$(echo "$AI_SUMMARY" | sed 's/^#\+ //')
 
           TEAMS_PAYLOAD=$(cat <<EOF
-          {
-            "@type": "MessageCard",
-            "@context": "http://schema.org/extensions",
-            "themeColor": "0076D7",
-            "summary": "New AI PR Summary",
-            "sections": [
-              {
-                "activityTitle": "**📝 AI-Generated PR Summary**",
-                "activitySubtitle": "📂 Repository: **$REPO_NAME**",
-                "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
-                "facts": [
-                  { "name": "🔖 Pull Request", "value": "[${pr_title} (PR #${PR_NUMBER})](${PR_URL})" },
-                  { "name": "📅 Created By", "value": "${{ github.actor }}" },
-                  { "name": "📈 Changes", "value": "Files modified" }
-                ],
-                "markdown": true
-              },
-              {
-                "title": "📄 **Summary**",
-                "text": "$SUMMARY_FOR_TEAMS",
-                "markdown": true
-              },
-              {
-                "potentialAction": [
-                  {
-                    "@type": "OpenUri",
-                    "name": "🔗 View on GitHub",
-                    "targets": [
-                      { "os": "default", "uri": "$PR_URL" }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-          EOF
-          )
-
+{
+  "@type": "MessageCard",
+  "@context": "http://schema.org/extensions",
+  "themeColor": "0076D7",
+  "summary": "New AI PR Summary",
+  "sections": [
+    {
+      "activityTitle": "**📝 AI-Generated PR Summary**",
+      "activitySubtitle": "📂 Repository: **$REPO_NAME**",
+      "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
+      "facts": [
+        { "name": "🔖 Pull Request", "value": "[$pr_title (PR #$PR_NUMBER)]($PR_URL)" },
+        { "name": "📅 Created By", "value": "${{ github.actor }}" },
+        { "name": "📈 Changes", "value": "Files modified" }
+      ],
+      "markdown": true
+    },
+    {
+      "title": "📄 **Summary**",
+      "text": "$SUMMARY_FOR_TEAMS",
+      "markdown": true
+    },
+    {
+      "potentialAction": [
+        {
+          "@type": "OpenUri",
+          "name": "🔗 View on GitHub",
+          "targets": [
+            { "os": "default", "uri": "$PR_URL" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+EOF
+)
+          echo "$TEAMS_PAYLOAD"
           curl -X POST -H "Content-Type: application/json" -d "$TEAMS_PAYLOAD" ${{ secrets.TEAMS_WEBHOOK_URL }}
