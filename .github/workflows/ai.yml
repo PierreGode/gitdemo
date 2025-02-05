@@ -247,7 +247,7 @@ jobs:
           echo "ai_summary=$AI_SUMMARY" >> $GITHUB_ENV
 
       - name: Post AI Summary to Teams
-        if: steps.fetch_comments.outputs.ai_summary != ''
+        if: env.ai_summary != ''
         run: |
           AI_SUMMARY="${{ env.ai_summary }}"
           echo "Posting AI summary to Teams..."
