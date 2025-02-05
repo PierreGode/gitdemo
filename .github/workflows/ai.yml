@@ -167,8 +167,6 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/commits/${COMMIT_SHA}/pulls")
 
-          echo "Raw PR info: $PR_INFO"
-
           PR_NUMBER=$(echo "$PR_INFO" | jq -r '.[0].number // empty')
 
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
@@ -185,8 +183,6 @@ jobs:
         id: fetch_comments
         run: |
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          echo "Fetching comments for PR #${PR_NUMBER}..."
-
           COMMENTS=$(curl -s \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
@@ -213,13 +209,15 @@ jobs:
           echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Post AI Summary to Teams
+      - name: Send AI Summary to Teams
         if: steps.fetch_comments.outputs.ai_summary != ''
         run: |
           AI_SUMMARY="${{ steps.fetch_comments.outputs.ai_summary }}"
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          echo "Sending AI Summary for PR #${PR_NUMBER} to Teams..."
-
+          PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER }}"
+          REPO_NAME="${{ github.repository }}"
+          
+          # Prepare Teams message
           SUMMARY_FOR_TEAMS=$(echo "$AI_SUMMARY" | sed 's/^#\+ //')
 
           TEAMS_PAYLOAD=$(cat <<EOF
@@ -227,13 +225,33 @@ jobs:
             "@type": "MessageCard",
             "@context": "http://schema.org/extensions",
             "themeColor": "0076D7",
-            "summary": "AI PR Summary",
+            "summary": "New AI PR Summary",
             "sections": [
               {
-                "activityTitle": "PR #${PR_NUMBER}",
-                "activitySubtitle": "Repository: ${{ github.repository }}",
+                "activityTitle": "**📝 AI-Generated PR Summary**",
+                "activitySubtitle": "📂 Repository: **$REPO_NAME**",
+                "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
                 "facts": [
-                  { "name": "AI Summary", "value": "$SUMMARY_FOR_TEAMS" }
+                  { "name": "🔖 Pull Request", "value": "[${pr_title} (PR #${PR_NUMBER})](${PR_URL})" },
+                  { "name": "📅 Created By", "value": "${{ github.actor }}" },
+                  { "name": "📈 Changes", "value": "Files modified" }
+                ],
+                "markdown": true
+              },
+              {
+                "title": "📄 **Summary**",
+                "text": "$SUMMARY_FOR_TEAMS",
+                "markdown": true
+              },
+              {
+                "potentialAction": [
+                  {
+                    "@type": "OpenUri",
+                    "name": "🔗 View on GitHub",
+                    "targets": [
+                      { "os": "default", "uri": "$PR_URL" }
+                    ]
+                  }
                 ]
               }
             ]
@@ -241,5 +259,4 @@ jobs:
           EOF
           )
 
-          curl -X POST -H "Content-Type: application/json" \
-          -d "$TEAMS_PAYLOAD" ${{ secrets.TEAMS_WEBHOOK_URL }}
+          curl -X POST -H "Content-Type: application/json" -d "$TEAMS_PAYLOAD" ${{ secrets.TEAMS_WEBHOOK_URL }}
