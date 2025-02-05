@@ -220,8 +220,25 @@ jobs:
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
           echo "Sending AI Summary for PR #${PR_NUMBER} to Teams..."
 
+          # Fetch PR details for enhanced message
+          PR_INFO=$(curl -s \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}")
+
+          PR_TITLE=$(echo "$PR_INFO" | jq -r '.title')
+          PR_URL=$(echo "$PR_INFO" | jq -r '.html_url')
+          REPO_NAME="${{ github.repository }}"
+          PR_USER=$(echo "$PR_INFO" | jq -r '.user.login')
+          FILES_MODIFIED=$(curl -s \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: Bearer ${{ secrets.G_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}/files" | jq 'length')
+
+          # Prepare summary for Teams with additional details
           SUMMARY_FOR_TEAMS=$(echo "$AI_SUMMARY" | sed 's/^#\+ //')
 
+          # Prepare the Teams Payload with additional facts
           TEAMS_PAYLOAD=$(cat <<EOF
           {
             "@type": "MessageCard",
@@ -230,16 +247,38 @@ jobs:
             "summary": "AI PR Summary",
             "sections": [
               {
-                "activityTitle": "PR #${PR_NUMBER}",
-                "activitySubtitle": "Repository: ${{ github.repository }}",
+                "activityTitle": "**📝 AI-Generated PR Summary**",
+                "activitySubtitle": "📂 Repository: **$REPO_NAME**",
+                "activityImage": "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png",
                 "facts": [
-                  { "name": "AI Summary", "value": "$SUMMARY_FOR_TEAMS" }
+                  { "name": "🔖 Pull Request", "value": "[${PR_TITLE} (#{PR_NUMBER})](${PR_URL})" },
+                  { "name": "📅 Created By", "value": "$PR_USER" },
+                  { "name": "📈 Files Modified", "value": "$FILES_MODIFIED files modified" }
+                ],
+                "markdown": true
+              },
+              {
+                "title": "📄 **Summary**",
+                "text": "$SUMMARY_FOR_TEAMS",
+                "markdown": true
+              },
+              {
+                "potentialAction": [
+                  {
+                    "@type": "OpenUri",
+                    "name": "🔗 View on GitHub",
+                    "targets": [
+                      { "os": "default", "uri": "${PR_URL}" }
+                    ]
+                  }
                 ]
               }
             ]
           }
-          EOF
+EOF
           )
 
           curl -X POST -H "Content-Type: application/json" \
           -d "$TEAMS_PAYLOAD" ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+          echo "PR Summary sent to Microsoft Teams successfully."
