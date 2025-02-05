@@ -214,7 +214,7 @@ jobs:
         run: |
           AI_SUMMARY="${{ steps.fetch_comments.outputs.ai_summary }}"
           PR_NUMBER="${{ steps.find_pr.outputs.pr_number }}"
-          PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER }"
+          PR_URL="https://github.com/${{ github.repository }}/pull/${PR_NUMBER}"
           REPO_NAME="${{ github.repository }}"
           
           # Prepare Teams message
