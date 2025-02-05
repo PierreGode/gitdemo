@@ -29,9 +29,9 @@ jobs:
         id: read_readme
         run: |
           README_CONTENT=$(cat README.md)
-          echo "README<<EOF" >> $GITHUB_OUTPUT
-          echo "$README_CONTENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "README<<EOF" >> $GITHUB_ENV
+          echo "$README_CONTENT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Set Up Python
         uses: actions/setup-python@v4
@@ -47,7 +47,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.G_TOKEN }}
-          README_CONTENT: ${{ steps.read_readme.outputs.README }}
+          README_CONTENT: ${{ env.README }}
         run: |
           python - <<EOF
           import os
@@ -138,9 +138,9 @@ jobs:
         id: read_readme_review
         run: |
           README_CONTENT=$(cat README.md)
-          echo "README<<EOF" >> $GITHUB_OUTPUT
-          echo "$README_CONTENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "README<<EOF" >> $GITHUB_ENV
+          echo "$README_CONTENT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: AI Code Review
         uses: PierreGode/GPTcode-reviewer@main
@@ -149,7 +149,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_MODEL: "gpt-4o-mini"
           exclude: "**/*.json,**/*.md"
-          additional_context: ${{ steps.read_readme_review.outputs.README }}
+          additional_context: ${{ env.README }}
 
   post_merge:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
@@ -176,11 +176,11 @@ jobs:
 
           if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
             echo "No PR found for commit $COMMIT_SHA."
-            echo "pr_number=" >> $GITHUB_OUTPUT
+            echo "pr_number=" >> $GITHUB_ENV
             exit 0
           else
             echo "Found PR #$PR_NUMBER"
-            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_ENV
           fi
 
       - name: Print PR details
@@ -217,7 +217,7 @@ jobs:
 
           if [ "$COMMENT_COUNT" -eq 0 ]; then
             echo "No comments found for PR #${PR_NUMBER}."
-            echo "ai_summary=" >> $GITHUB_OUTPUT
+            echo "ai_summary=" >> $GITHUB_ENV
             exit 0
           fi
 
@@ -227,7 +227,7 @@ jobs:
 
           if [ -z "$AI_SUMMARY_COMMENT" ]; then
             echo "No comment containing 'AI Pull Request Summary' found."
-            echo "ai_summary=" >> $GITHUB_OUTPUT
+            echo "ai_summary=" >> $GITHUB_ENV
             exit 0
           fi
 
@@ -245,9 +245,9 @@ jobs:
           echo "Extracted AI Summary: $AI_SUMMARY"
 
           # Save the AI summary to output
-          echo "ai_summary<<EOF" >> $GITHUB_OUTPUT
-          echo "$AI_SUMMARY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "ai_summary<<EOF" >> $GITHUB_ENV
+          echo "$AI_SUMMARY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Post AI Summary to Teams
         if: steps.fetch_comments.outputs.ai_summary != ''
