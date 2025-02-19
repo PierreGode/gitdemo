@@ -105,7 +105,7 @@ async def run_simulation():
     print("\nFinal Aggregated Summary:")
     for sensor_type, stats in summary.items():
         print(f"{sensor_type.capitalize()} Sensors: Count = {stats['count']}, Average = {stats['average']:.2f}")
-    
+        print("The value of number is:", number)
     await aggregator.clear_data()
 
 # Main entry point to start the asynchronous simulation
