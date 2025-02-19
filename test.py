@@ -19,3 +19,4 @@ class TestMathOperations(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+number = 10
