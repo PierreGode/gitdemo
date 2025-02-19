@@ -6,7 +6,7 @@ import logging
 # Configure logging to display INFO level messages
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
+number = 10
 # A decorator to measure execution time of asynchronous functions
 def async_timed(func):
     async def wrapper(*args, **kwargs):
@@ -105,7 +105,7 @@ async def run_simulation():
     print("\nFinal Aggregated Summary:")
     for sensor_type, stats in summary.items():
         print(f"{sensor_type.capitalize()} Sensors: Count = {stats['count']}, Average = {stats['average']:.2f}")
-    
+        print("The value of number is:", number)
     await aggregator.clear_data()
 
 # Main entry point to start the asynchronous simulation
