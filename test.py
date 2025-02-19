@@ -6,7 +6,7 @@ import logging
 # Configure logging to display INFO level messages
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
+number = 10
 # A decorator to measure execution time of asynchronous functions
 def async_timed(func):
     async def wrapper(*args, **kwargs):
